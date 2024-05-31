@@ -2,7 +2,7 @@ name: ci-test-ginkgo
 
 on:
   push:
-    branches: [main]
+    branches: [k8s_testing]
     paths:
       - "KubeArmor/**"
       - "tests/**"
