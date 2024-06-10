@@ -8,6 +8,13 @@ builds:
     goarch:
       - amd64
       - arm64
+    env:
+      - CGO_ENABLED=0
+
+release:
+  replace_existing_artifacts: true
+  mode: replace
+  make_latest: false
 
 signs:
   - cmd: cosign
@@ -20,7 +27,7 @@ signs:
       - --yes
     artifacts: all
     output: true
-    
+
 archives:
   - id: "kubearmor"
     builds:

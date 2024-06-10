@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -550,9 +551,6 @@ func (dm *KubeArmorDaemon) HandleUnknownNamespaceNsMap(container *tp.Container) 
 
 // WatchK8sPods Function
 func (dm *KubeArmorDaemon) WatchK8sPods() {
-	var controllerName, controller, namespace string
-	var err error
-
 	nodeName := os.Getenv("KUBEARMOR_NODENAME")
 	if nodeName == "" {
 		nodeName = cfg.GlobalCfg.Host
@@ -591,29 +589,43 @@ func (dm *KubeArmorDaemon) WatchK8sPods() {
 				pod.Metadata["namespaceName"] = event.Object.ObjectMeta.Namespace
 				pod.Metadata["podName"] = event.Object.ObjectMeta.Name
 
+				var controllerName, controller, namespace string
+				var err error
+
 				if event.Type == "ADDED" {
 					controllerName, controller, namespace, err = getTopLevelOwner(event.Object.ObjectMeta, event.Object.Namespace, event.Object.Kind)
 					if err != nil {
 						dm.Logger.Warnf("Failed to get ownerRef (%s, %s)", event.Object.ObjectMeta.Name, err.Error())
 					}
+
+					owner := tp.PodOwner{
+						Name:      controllerName,
+						Ref:       controller,
+						Namespace: namespace,
+					}
+
+					dm.OwnerInfo[pod.Metadata["podName"]] = owner
+					podOwnerName = controllerName
 				}
-				_, err := K8s.K8sClient.CoreV1().Pods(namespace).Get(context.Background(), event.Object.ObjectMeta.Name, metav1.GetOptions{})
-				if err == nil && (event.Type == "MODIFIED" || event.Type != "DELETED") {
+
+				// for event = "MODIFIED" we first check pod's existence to update current dm.OwnerInfo of the pod, because when pod is in terminating state then we cannot get the owner info from it.
+				// we do not update owner info in terminating state. After pod is deleted we delete the owner info from the map.
+				_, err = K8s.K8sClient.CoreV1().Pods(namespace).Get(context.Background(), event.Object.ObjectMeta.Name, metav1.GetOptions{})
+				if err == nil && event.Type == "MODIFIED" {
 					controllerName, controller, namespace, err = getTopLevelOwner(event.Object.ObjectMeta, event.Object.Namespace, event.Object.Kind)
 					if err != nil {
 						dm.Logger.Warnf("Failed to get ownerRef (%s, %s)", event.Object.ObjectMeta.Name, err.Error())
 					}
+
+					owner := tp.PodOwner{
+						Name:      controllerName,
+						Ref:       controller,
+						Namespace: namespace,
+					}
+
+					dm.OwnerInfo[pod.Metadata["podName"]] = owner
+					podOwnerName = controllerName
 				}
-
-				owner := tp.PodOwner{
-					Name:      controllerName,
-					Ref:       controller,
-					Namespace: namespace,
-				}
-
-				dm.OwnerInfo[pod.Metadata["podName"]] = owner
-
-				podOwnerName = controllerName
 
 				//get the owner , then check if that owner has owner if...do it recusivelt until you get the no owner
 
@@ -759,6 +771,22 @@ func (dm *KubeArmorDaemon) WatchK8sPods() {
 							pod, err := K8s.K8sClient.CoreV1().Pods(pod.Metadata["namespaceName"]).Get(context.Background(), podOwnerName, metav1.GetOptions{})
 							if err == nil {
 								for _, c := range pod.Spec.Containers {
+									containers = append(containers, c.Name)
+								}
+							}
+
+						} else if dm.OwnerInfo[pod.Metadata["podName"]].Ref == "Job" {
+							job, err := K8s.K8sClient.BatchV1().Jobs(pod.Metadata["namespaceName"]).Get(context.Background(), podOwnerName, metav1.GetOptions{})
+							if err == nil {
+								for _, c := range job.Spec.Template.Spec.Containers {
+									containers = append(containers, c.Name)
+								}
+							}
+
+						} else if dm.OwnerInfo[pod.Metadata["podName"]].Ref == "CronJob" {
+							cronJob, err := K8s.K8sClient.BatchV1().CronJobs(pod.Metadata["namespaceName"]).Get(context.Background(), podOwnerName, metav1.GetOptions{})
+							if err == nil {
+								for _, c := range cronJob.Spec.JobTemplate.Spec.Template.Spec.Containers {
 									containers = append(containers, c.Name)
 								}
 							}
@@ -2351,6 +2379,7 @@ func (dm *KubeArmorDaemon) WatchConfigMap() cache.InformerSynced {
 
 	cmNS := dm.GetConfigMapNS()
 
+	var err error
 	registration, err := informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if cm, ok := obj.(*corev1.ConfigMap); ok && cm.Namespace == cmNS {
@@ -2369,6 +2398,19 @@ func (dm *KubeArmorDaemon) WatchConfigMap() cache.InformerSynced {
 					NetworkAction:      cfg.GlobalCfg.DefaultNetworkPosture,
 					CapabilitiesAction: cfg.GlobalCfg.DefaultCapabilitiesPosture,
 				}
+				if _, ok := cm.Data[cfg.ConfigAlertThrottling]; ok {
+					cfg.GlobalCfg.AlertThrottling = (cm.Data[cfg.ConfigAlertThrottling] == "true")
+				}
+				cfg.GlobalCfg.MaxAlertPerSec, err = strconv.Atoi(cm.Data[cfg.ConfigMaxAlertPerSec])
+				if err != nil {
+					dm.Logger.Warnf("Error: %s", err)
+				}
+				cfg.GlobalCfg.ThrottleSec, err = strconv.Atoi(cm.Data[cfg.ConfigThrottleSec])
+				if err != nil {
+					dm.Logger.Warnf("Error: %s", err)
+				}
+				dm.SystemMonitor.UpdateThrottlingConfig()
+
 				dm.Logger.Printf("Current Global Posture is %v", currentGlobalPosture)
 				dm.UpdateGlobalPosture(globalPosture)
 
@@ -2402,6 +2444,19 @@ func (dm *KubeArmorDaemon) WatchConfigMap() cache.InformerSynced {
 				dm.updatEndpointsWithCM(cm, "MODIFIED")
 				// update visibility for namespaces
 				dm.updateVisibilityWithCM(cm, "MODIFIED")
+
+				if _, ok := cm.Data[cfg.ConfigAlertThrottling]; ok {
+					cfg.GlobalCfg.AlertThrottling = (cm.Data[cfg.ConfigAlertThrottling] == "true")
+				}
+				cfg.GlobalCfg.MaxAlertPerSec, err = strconv.Atoi(cm.Data[cfg.ConfigMaxAlertPerSec])
+				if err != nil {
+					dm.Logger.Warnf("Error: %s", err)
+				}
+				cfg.GlobalCfg.ThrottleSec, err = strconv.Atoi(cm.Data[cfg.ConfigThrottleSec])
+				if err != nil {
+					dm.Logger.Warnf("Error: %s", err)
+				}
+				dm.SystemMonitor.UpdateThrottlingConfig()
 			}
 		},
 		DeleteFunc: func(obj interface{}) {

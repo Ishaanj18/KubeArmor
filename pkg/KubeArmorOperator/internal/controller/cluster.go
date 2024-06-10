@@ -701,7 +701,7 @@ func (clusterWatcher *ClusterWatcher) DeleteAllTlsSecrets() error {
 	for _, secret := range tlsSecrets {
 		err := clusterWatcher.Client.CoreV1().Secrets(common.Namespace).Delete(context.Background(), secret, v1.DeleteOptions{})
 		if err != nil {
-			clusterWatcher.Log.Errorf("error while deleing secret: %s", secret)
+			clusterWatcher.Log.Errorf("error while deleing secret: %s, error=%s", secret, err.Error())
 			return err
 		}
 	}
@@ -781,6 +781,27 @@ func UpdateConfigMapData(config *opv1.KubeArmorConfigSpec) bool {
 	if config.DefaultVisibility != "" {
 		if common.ConfigMapData[common.ConfigVisibility] != config.DefaultVisibility {
 			common.ConfigMapData[common.ConfigVisibility] = config.DefaultVisibility
+			updated = true
+		}
+	}
+	AlertThrottlingEnabled := strconv.FormatBool(config.AlertThrottling)
+	if AlertThrottlingEnabled != "" {
+		if common.ConfigMapData[common.ConfigAlertThrottling] != AlertThrottlingEnabled {
+			common.ConfigMapData[common.ConfigAlertThrottling] = AlertThrottlingEnabled
+			updated = true
+		}
+	}
+	MaxAlertPerSec := strconv.FormatInt(int64(config.MaxAlertPerSec), 10)
+	if MaxAlertPerSec != "" {
+		if common.ConfigMapData[common.ConfigMaxAlertPerSec] != MaxAlertPerSec {
+			common.ConfigMapData[common.ConfigMaxAlertPerSec] = MaxAlertPerSec
+			updated = true
+		}
+	}
+	ThrottleSec := strconv.FormatInt(int64(config.ThrottleSec), 10)
+	if MaxAlertPerSec != "" {
+		if common.ConfigMapData[common.ConfigThrottleSec] != ThrottleSec {
+			common.ConfigMapData[common.ConfigThrottleSec] = ThrottleSec
 			updated = true
 		}
 	}
