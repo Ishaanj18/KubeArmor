@@ -575,9 +575,14 @@ func KubeArmor() {
 				cfg.GlobalCfg.CRISocket = "unix://" + kl.GetCRISocket("")
 			}
 		}
+		dm.Logger.Warnf("checking if custom logger is working")
 
 		// monitor containers
-		if strings.Contains(cfg.GlobalCfg.CRISocket, "docker") {
+		if strings.Contains(cfg.GlobalCfg.CRISocket, "podman") {
+			dm.Logger.Warnf("podman mai aa gaya hu")
+			// monitor crio events
+			go dm.ListenToHook()
+		} else if strings.Contains(cfg.GlobalCfg.CRISocket, "docker") {
 			// update already deployed containers
 			dm.GetAlreadyDeployedDockerContainers()
 			// monitor docker events

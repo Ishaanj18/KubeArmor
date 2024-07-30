@@ -407,10 +407,14 @@ func IsK8sEnv() bool {
 }
 
 // ContainerRuntimeSocketKeys contains FIFO ordered keys of container runtimes
-var ContainerRuntimeSocketKeys = []string{"docker", "containerd", "cri-o"}
+var ContainerRuntimeSocketKeys = []string{"podman", "docker", "containerd", "cri-o"}
 
 // ContainerRuntimeSocketMap Structure
 var ContainerRuntimeSocketMap = map[string][]string{
+	"podman": {
+		"/var/run/podman/podman.sock",
+		"/run/podman/podman.sock",
+	},
 	"docker": {
 		"/var/run/docker.sock",
 		"/run/docker.sock",
