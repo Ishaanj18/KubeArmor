@@ -204,6 +204,7 @@ func (dm *KubeArmorDaemon) ParseAndUpdateContainerSecurityPolicy(event tp.K8sKub
 	secPolicy.Metadata = map[string]string{}
 	secPolicy.Metadata["namespaceName"] = "container_namespace" //event.Object.Metadata.Namespace
 	secPolicy.Metadata["policyName"] = event.Object.Metadata.Name
+	dm.Logger.Warnf("this is the policy name %v", event.Object.Metadata.Name)
 
 	if err := kl.Clone(event.Object.Spec, &secPolicy.Spec); err != nil {
 		dm.Logger.Errf("Failed to clone a spec (%s)", err.Error())
